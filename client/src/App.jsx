@@ -37,12 +37,6 @@ function App() {
       <button onClick={handleUpload} disabled={!file}>
         Upload Video
       </button>
-      {progress > 0 && (
-        <div>
-          <progress value={progress} max="100">{progress}%</progress>
-          <span>{Math.round(progress)}%</span>
-        </div>
-      )}
     </div>
   )
 }
