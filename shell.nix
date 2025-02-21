@@ -7,6 +7,7 @@ pkgs.mkShell {
     python311Packages.flask # Flask
     python311Packages.flask-cors # Add Flask-CORS
     ffmpeg # Add FFmpeg
+    cpulimit # Add cpulimit
   ];
 
   shellHook = ''

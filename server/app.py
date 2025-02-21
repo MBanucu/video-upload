@@ -36,40 +36,44 @@ def convert_to_hls(input_path, output_base):
         {"height": 1440, "bitrate": "8000k"}
     ]
 
-    # Build the FFmpeg command
-    cmd = [
+    # Base FFmpeg command
+    ffmpeg_cmd = [
         'ffmpeg',
-        '-i', input_path,  # Input file
-        '-preset', 'fast',  # Encoding speed
-        '-c:v', 'libx264',  # Video codec
-        '-c:a', 'aac',      # Audio codec
-        '-f', 'hls',        # HLS format
-        '-hls_time', '10',  # Segment duration (10 seconds)
-        '-hls_list_size', '0',  # Unlimited playlist size
-        '-hls_segment_filename', f'{output_base}/v%v/segment%d.ts',  # Segment file pattern
+        '-i', input_path,
+        '-preset', 'fast',
+        '-c:v', 'libx264',
+        '-c:a', 'aac',
+        '-f', 'hls',
+        '-hls_time', '10',
+        '-hls_list_size', '0',
+        '-hls_segment_filename', f'{output_base}/v%v/segment%d.ts',
     ]
 
     # Add scaling and bitrate for each resolution
     for i, res in enumerate(resolutions):
-        cmd.extend([
-            f'-vf:{i}', f'scale=-2:{res["height"]}',  # Scale to height, preserve aspect ratio
-            f'-b:v:{i}', res["bitrate"],              # Video bitrate
-            f'-map', '0:v',                           # Map video stream
-            f'-map', '0:a?',                          # Map audio stream (optional)
+        ffmpeg_cmd.extend([
+            f'-vf:{i}', f'scale=-2:{res["height"]}',
+            f'-b:v:{i}', res["bitrate"],
+            f'-map', '0:v',
+            f'-map', '0:a?',
         ])
 
-    # Variable stream mapping for HLS variants
+    # Variable stream mapping
     var_stream_map = ' '.join(f'v:{i},a:{i}' for i in range(len(resolutions)))
-    cmd.extend([
+    ffmpeg_cmd.extend([
         '-var_stream_map', var_stream_map,
-        '-master_pl_name', f'{output_base}/master.m3u8',  # Master playlist
-        f'{output_base}/v%v/playlist.m3u8'               # Variant playlists
+        '-master_pl_name', f'{output_base}/master.m3u8',
+        f'{output_base}/v%v/playlist.m3u8'
     ])
 
+    # Wrap FFmpeg with cpulimit to limit CPU to 50%
+    cmd = ['cpulimit', '--limit', '50', '--'] + ffmpeg_cmd
+
     try:
-        # Run FFmpeg command
-        subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        # Run the command
+        result = subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         logger.info(f"HLS conversion completed for {input_path}")
+        logger.debug(f"FFmpeg output: {result.stdout}")
     except subprocess.CalledProcessError as e:
         logger.error(f"FFmpeg error: {e.stderr}")
         raise
@@ -95,7 +99,7 @@ def upload_file():
     os.makedirs(output_base, exist_ok=True)
 
     try:
-        # Convert to HLS
+        # Convert to HLS with CPU limit
         convert_to_hls(file_path, output_base)
         return jsonify({
             'message': 'File uploaded and converted to HLS successfully',
