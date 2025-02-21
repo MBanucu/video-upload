@@ -105,19 +105,21 @@ function App() {
           {status.ffmpeg_progress && (
             <div>
               <h3>FFmpeg Conversion Progress:</h3>
-              {Object.entries(status.ffmpeg_progress).map(([height, prog]) => (
-                <div key={height}>
-                  <p>
-                    {height}p: {prog.status}
-                  </p>
-                  {prog.status === 'processing' && prog.progress.time && (
-                    <p>Time Processed: {prog.progress.time}</p>
-                  )}
-                  {prog.status === 'processing' && prog.progress.frame && (
-                    <p>Frames: {prog.progress.frame}</p>
-                  )}
-                </div>
-              ))}
+              {Object.entries(status.ffmpeg_progress)
+                .reverse() // Reverse the order: last (1440p) to first (144p)
+                .map(([height, prog]) => (
+                  <div key={height}>
+                    <p>
+                      {height}p: {prog.status}
+                    </p>
+                    {prog.status === 'processing' && prog.progress.time && (
+                      <p>Time Processed: {prog.progress.time}</p>
+                    )}
+                    {prog.status === 'processing' && prog.progress.frame && (
+                      <p>Frames: {prog.progress.frame}</p>
+                    )}
+                  </div>
+                ))}
             </div>
           )}
         </div>
