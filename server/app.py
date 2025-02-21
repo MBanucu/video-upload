@@ -58,7 +58,7 @@ def convert_resolution_to_hls(input_path, output_base, resolution, filename):
         '-b:v', bitrate,
         '-c:a', 'aac',
         '-f', 'hls',
-        '-hls_time', '10',
+        '-hls_time', '2',  # Changed from 10 to 2 seconds
         '-hls_list_size', '0',
         '-hls_segment_filename', f'{output_dir}/segment%d.ts',
         f'{output_dir}/playlist.m3u8',
