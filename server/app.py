@@ -107,10 +107,14 @@ def background_convert(file_path, output_base, resolutions, filename):
     """Run HLS conversion in the background, processing resolutions sequentially."""
     available_resolutions = []
     try:
-        for res in resolutions:
+        res = resolutions[0]
+        available_resolutions.append(res)
+        write_master_m3u8(output_base, available_resolutions)
+        convert_resolution_to_hls(file_path, output_base, res, filename)
+        for res in resolutions[1:]:
+            convert_resolution_to_hls(file_path, output_base, res, filename)
             available_resolutions.append(res)
             write_master_m3u8(output_base, available_resolutions)
-            convert_resolution_to_hls(file_path, output_base, res, filename)
         logger.info(f"Background HLS conversion completed for {file_path}")
     except Exception as e:
         logger.error(f"Background conversion failed: {e}")
