@@ -1,5 +1,5 @@
 # server/app.py
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
 import os
 import logging
@@ -45,7 +45,7 @@ def convert_resolution_to_hls(input_path, output_base, resolution):
     os.makedirs(output_dir, exist_ok=True)
 
     cmd = [
-        'cpulimit', '--limit', '50', '--',  # Limit CPU to 50%
+        'cpulimit', '--limit', '50', '--',
         'ffmpeg',
         '-i', input_path,
         '-vf', f'scale=-2:{height}',
@@ -103,8 +103,8 @@ def upload_file():
         completed_resolutions = []
         for res in resolutions:
             completed_resolutions.append(res)
-            write_master_m3u8(output_base, completed_resolutions)
-            convert_resolution_to_hls(file_path, output_base, res)
+            write_master_m3u8(output_base, completed_resolutions)   # Then update master.m3u8
+            convert_resolution_to_hls(file_path, output_base, res)  # Convert first
 
         return jsonify({
             'message': 'File uploaded and converted to HLS successfully',
@@ -114,6 +114,11 @@ def upload_file():
     except Exception as e:
         logger.error(f"Conversion failed: {e}")
         return jsonify({'error': 'HLS conversion failed'}), 500
+
+@app.route('/uploads/<path:filename>')
+def serve_file(filename):
+    """Serve static HLS files from the uploads directory."""
+    return send_from_directory(app.config['UPLOAD_FOLDER'], filename)
 
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=5000)
