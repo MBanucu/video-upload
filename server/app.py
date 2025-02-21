@@ -1,26 +1,78 @@
-# server/app.py (unchanged)
+# server/app.py
 from flask import Flask, request, jsonify
-from flask_cors import CORS  # Import CORS
+from flask_cors import CORS
 import os
 import logging
+import subprocess
 
 app = Flask(__name__)
 UPLOAD_FOLDER = 'uploads'
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 
 # Enable CORS
-CORS(app)  # Add this line to allow cross-origin requests
+CORS(app)
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# Create uploads directory if it doesn’t exist
 if not os.path.exists(UPLOAD_FOLDER):
     os.makedirs(UPLOAD_FOLDER)
 
 def allowed_file(filename):
     return '.' in filename and \
            filename.rsplit('.', 1)[1].lower() in {'mp4', 'avi', 'mov', 'wmv', 'mkv', 'mts'}
+
+def convert_to_hls(input_path, output_base):
+    # Define resolutions and their settings
+    resolutions = [
+        {"height": 144, "bitrate": "200k"},
+        {"height": 240, "bitrate": "400k"},
+        {"height": 360, "bitrate": "800k"},
+        {"height": 480, "bitrate": "1200k"},
+        {"height": 720, "bitrate": "2500k"},
+        {"height": 1080, "bitrate": "5000k"},
+        {"height": 1440, "bitrate": "8000k"}
+    ]
+
+    # Build the FFmpeg command
+    cmd = [
+        'ffmpeg',
+        '-i', input_path,  # Input file
+        '-preset', 'fast',  # Encoding speed
+        '-c:v', 'libx264',  # Video codec
+        '-c:a', 'aac',      # Audio codec
+        '-f', 'hls',        # HLS format
+        '-hls_time', '10',  # Segment duration (10 seconds)
+        '-hls_list_size', '0',  # Unlimited playlist size
+        '-hls_segment_filename', f'{output_base}/v%v/segment%d.ts',  # Segment file pattern
+    ]
+
+    # Add scaling and bitrate for each resolution
+    for i, res in enumerate(resolutions):
+        cmd.extend([
+            f'-vf:{i}', f'scale=-2:{res["height"]}',  # Scale to height, preserve aspect ratio
+            f'-b:v:{i}', res["bitrate"],              # Video bitrate
+            f'-map', '0:v',                           # Map video stream
+            f'-map', '0:a?',                          # Map audio stream (optional)
+        ])
+
+    # Variable stream mapping for HLS variants
+    var_stream_map = ' '.join(f'v:{i},a:{i}' for i in range(len(resolutions)))
+    cmd.extend([
+        '-var_stream_map', var_stream_map,
+        '-master_pl_name', f'{output_base}/master.m3u8',  # Master playlist
+        f'{output_base}/v%v/playlist.m3u8'               # Variant playlists
+    ])
+
+    try:
+        # Run FFmpeg command
+        subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        logger.info(f"HLS conversion completed for {input_path}")
+    except subprocess.CalledProcessError as e:
+        logger.error(f"FFmpeg error: {e.stderr}")
+        raise
 
 @app.route('/upload', methods=['POST'])
 def upload_file():
@@ -31,10 +83,28 @@ def upload_file():
     if file.filename == '':
         return jsonify({'error': 'No file selected'}), 400
     
-    if file and allowed_file(file.filename):
-        filename = file.filename
-        file.save(os.path.join(app.config['UPLOAD_FOLDER'], filename))
-        return jsonify({'message': 'File uploaded successfully', 'filename': filename}), 200
+    if not allowed_file(file.filename):
+        return jsonify({'error': 'Invalid file type'}), 400
+
+    filename = file.filename
+    file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+    file.save(file_path)
+    
+    # Create output directory for HLS files
+    output_base = os.path.join(app.config['UPLOAD_FOLDER'], f"hls_{os.path.splitext(filename)[0]}")
+    os.makedirs(output_base, exist_ok=True)
+
+    try:
+        # Convert to HLS
+        convert_to_hls(file_path, output_base)
+        return jsonify({
+            'message': 'File uploaded and converted to HLS successfully',
+            'filename': filename,
+            'hls_master': f"hls_{os.path.splitext(filename)[0]}/master.m3u8"
+        }), 200
+    except Exception as e:
+        logger.error(f"Conversion failed: {e}")
+        return jsonify({'error': 'HLS conversion failed'}), 500
 
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=5000)
