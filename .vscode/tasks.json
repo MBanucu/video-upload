@@ -1,0 +1,33 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+      {
+        "label": "Run Flask Server",
+        "type": "shell",
+        "command": "cd ${workspaceFolder}/server && python app.py",
+        "group": "build",
+        "presentation": {
+          "reveal": "always",
+          "panel": "new"
+        }
+      },
+      {
+        "label": "Run Vite Client",
+        "type": "shell",
+        "command": "cd ${workspaceFolder}/client && npm run dev",
+        "group": "build",
+        "presentation": {
+          "reveal": "always",
+          "panel": "new"
+        }
+      },
+      {
+        "label": "Run All",
+        "dependsOn": ["Run Flask Server", "Run Vite Client"],
+        "group": {
+          "kind": "build",
+          "isDefault": true
+        }
+      }
+    ]
+  }
