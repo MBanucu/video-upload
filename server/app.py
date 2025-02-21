@@ -5,6 +5,7 @@ import os
 import logging
 import subprocess
 from threading import Thread
+import re
 
 app = Flask(__name__)
 UPLOAD_FOLDER = 'uploads'
@@ -20,6 +21,9 @@ logger = logging.getLogger(__name__)
 # Create uploads directory if it doesn’t exist
 if not os.path.exists(UPLOAD_FOLDER):
     os.makedirs(UPLOAD_FOLDER)
+
+# Global dictionary to store FFmpeg progress per file
+ffmpeg_progress = {}
 
 def allowed_file(filename):
     return '.' in filename and \
@@ -37,8 +41,8 @@ def write_master_m3u8(output_base, resolutions_available):
         f.write(master_content)
     logger.info(f"Updated master.m3u8 with resolutions: {[r['height'] for r in resolutions_available]}")
 
-def convert_resolution_to_hls(input_path, output_base, resolution):
-    """Convert a single resolution to HLS segments and playlist."""
+def convert_resolution_to_hls(input_path, output_base, resolution, filename):
+    """Convert a single resolution to HLS segments and playlist with progress updates."""
     index = resolution['index']
     height = resolution['height']
     bitrate = resolution['bitrate']
@@ -57,25 +61,56 @@ def convert_resolution_to_hls(input_path, output_base, resolution):
         '-hls_time', '10',
         '-hls_list_size', '0',
         '-hls_segment_filename', f'{output_dir}/segment%d.ts',
-        f'{output_dir}/playlist.m3u8'
+        f'{output_dir}/playlist.m3u8',
+        '-progress', 'pipe:2'  # Output progress to stderr
     ]
 
-    try:
-        result = subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-        logger.info(f"Completed HLS conversion for {height}p")
-        logger.debug(f"FFmpeg output: {result.stdout}")
-    except subprocess.CalledProcessError as e:
-        logger.error(f"FFmpeg error for {height}p: {e.stderr}")
-        raise
+    # Initialize progress for this file and resolution
+    ffmpeg_progress[filename] = ffmpeg_progress.get(filename, {})
+    ffmpeg_progress[filename][height] = {'status': 'processing', 'progress': {}}
 
-def background_convert(file_path, output_base, resolutions):
+    try:
+        # Run FFmpeg with Popen to capture stderr in real-time
+        process = subprocess.Popen(cmd, stderr=subprocess.PIPE, universal_newlines=True)
+
+        # Regular expression to parse FFmpeg progress (e.g., "frame=123", "time=00:01:23")
+        progress_re = re.compile(r'(frame|fps|size|time|bitrate|speed)=(.+)')
+
+        # Read FFmpeg output line-by-line
+        for line in process.stderr:
+            match = progress_re.search(line)
+            if match:
+                key, value = match.groups()
+                ffmpeg_progress[filename][height]['progress'][key] = value
+                logger.debug(f"FFmpeg progress for {filename} ({height}p): {key}={value}")
+
+        # Wait for FFmpeg to finish and check exit code
+        process.wait()
+        if process.returncode != 0:
+            error_output = process.stderr.read()
+            logger.error(f"FFmpeg error for {height}p: {error_output}")
+            ffmpeg_progress[filename][height]['status'] = 'error'
+            raise subprocess.CalledProcessError(process.returncode, cmd, stderr=error_output)
+
+        logger.info(f"Completed HLS conversion for {height}p")
+        ffmpeg_progress[filename][height]['status'] = 'completed'
+
+    except subprocess.CalledProcessError as e:
+        logger.error(f"FFmpeg failed for {height}p: {e.stderr}")
+        ffmpeg_progress[filename][height]['status'] = 'error'
+        raise
+    finally:
+        # Clean up process if needed
+        process.stderr.close()
+
+def background_convert(file_path, output_base, resolutions, filename):
     """Run HLS conversion in the background, processing resolutions sequentially."""
     available_resolutions = []
     try:
         for res in resolutions:
             available_resolutions.append(res)
             write_master_m3u8(output_base, available_resolutions)
-            convert_resolution_to_hls(file_path, output_base, res)
+            convert_resolution_to_hls(file_path, output_base, res, filename)
         logger.info(f"Background HLS conversion completed for {file_path}")
     except Exception as e:
         logger.error(f"Background conversion failed: {e}")
@@ -112,7 +147,7 @@ def upload_file():
     ]
 
     # Start background conversion
-    Thread(target=background_convert, args=(file_path, output_base, resolutions)).start()
+    Thread(target=background_convert, args=(file_path, output_base, resolutions, filename)).start()
 
     # Return immediately with the HLS master URL
     return jsonify({
@@ -128,7 +163,7 @@ def serve_file(filename):
 
 @app.route('/status/<filename>')
 def conversion_status(filename):
-    """Check the status of HLS conversion for a given filename."""
+    """Check the status of HLS conversion for a given filename with FFmpeg progress."""
     output_base = os.path.join(app.config['UPLOAD_FOLDER'], f"hls_{os.path.splitext(filename)[0]}")
     master_path = f"{output_base}/master.m3u8"
     
@@ -140,7 +175,8 @@ def conversion_status(filename):
             return jsonify({
                 'status': 'pending',
                 'resolutions_available': 0,
-                'total_resolutions': total_resolutions
+                'total_resolutions': total_resolutions,
+                'ffmpeg_progress': ffmpeg_progress.get(filename, {})
             }), 200
         return jsonify({'status': 'not_found', 'error': 'File not uploaded'}), 404
 
@@ -154,11 +190,12 @@ def conversion_status(filename):
             'status': status,
             'resolutions_available': resolutions_available,
             'total_resolutions': total_resolutions,
-            'hls_master': f"hls_{os.path.splitext(filename)[0]}/master.m3u8"
+            'hls_master': f"hls_{os.path.splitext(filename)[0]}/master.m3u8",
+            'ffmpeg_progress': ffmpeg_progress.get(filename, {})
         }), 200
     except Exception as e:
         logger.error(f"Error reading master.m3u8: {e}")
-        return jsonify({'status': 'error', 'error': str(e)}), 500
+        return jsonify({'status': 'error', 'error': str(e), 'ffmpeg_progress': ffmpeg_progress.get(filename, {})}), 500
 
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=5000)

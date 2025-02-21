@@ -4,13 +4,11 @@ import axios from 'axios'
 
 function App() {
   const [file, setFile] = useState(null)
-  const [uploadProgress, setUploadProgress] = useState(0)
   const [message, setMessage] = useState('')
   const [status, setStatus] = useState(null)
 
   const handleFileChange = (e) => {
     setFile(e.target.files[0])
-    setUploadProgress(0)
     setMessage('')
     setStatus(null)
   }
@@ -66,6 +64,22 @@ function App() {
           <p>Resolutions Available: {status.resolutions_available}/{status.total_resolutions}</p>
           {status.hls_master && (
             <p>HLS Stream: <a href={`http://localhost:5000/uploads/${status.hls_master}`}>{status.hls_master}</a></p>
+          )}
+          {status.ffmpeg_progress && (
+            <div>
+              <h3>FFmpeg Progress:</h3>
+              {Object.entries(status.ffmpeg_progress).map(([height, prog]) => (
+                <div key={height}>
+                  <p>{height}p: {prog.status}</p>
+                  {prog.status === 'processing' && prog.progress.time && (
+                    <p>Time Processed: {prog.progress.time}</p>
+                  )}
+                  {prog.status === 'processing' && prog.progress.frame && (
+                    <p>Frames: {prog.progress.frame}</p>
+                  )}
+                </div>
+              ))}
+            </div>
           )}
         </div>
       )}
