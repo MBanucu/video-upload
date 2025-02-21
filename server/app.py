@@ -4,6 +4,7 @@ from flask_cors import CORS
 import os
 import logging
 import subprocess
+from threading import Thread
 
 app = Flask(__name__)
 UPLOAD_FOLDER = 'uploads'
@@ -67,6 +68,18 @@ def convert_resolution_to_hls(input_path, output_base, resolution):
         logger.error(f"FFmpeg error for {height}p: {e.stderr}")
         raise
 
+def background_convert(file_path, output_base, resolutions):
+    """Run HLS conversion in the background, processing resolutions sequentially."""
+    completed_resolutions = []
+    try:
+        for res in resolutions:
+            completed_resolutions.append(res)
+            write_master_m3u8(output_base, completed_resolutions)
+            convert_resolution_to_hls(file_path, output_base, res)
+        logger.info(f"Background HLS conversion completed for {file_path}")
+    except Exception as e:
+        logger.error(f"Background conversion failed: {e}")
+
 @app.route('/upload', methods=['POST'])
 def upload_file():
     if 'video' not in request.files:
@@ -98,26 +111,20 @@ def upload_file():
         {"index": 6, "height": 1440, "bitrate": "8000k", "resolution": "2560x1440"}
     ]
 
-    try:
-        # Process resolutions sequentially, starting with 144p
-        completed_resolutions = []
-        for res in resolutions:
-            completed_resolutions.append(res)
-            write_master_m3u8(output_base, completed_resolutions)   # Then update master.m3u8
-            convert_resolution_to_hls(file_path, output_base, res)  # Convert first
+    # Start background conversion
+    Thread(target=background_convert, args=(file_path, output_base, resolutions)).start()
 
-        return jsonify({
-            'message': 'File uploaded and converted to HLS successfully',
-            'filename': filename,
-            'hls_master': f"hls_{os.path.splitext(filename)[0]}/master.m3u8"
-        }), 200
-    except Exception as e:
-        logger.error(f"Conversion failed: {e}")
-        return jsonify({'error': 'HLS conversion failed'}), 500
+    # Return immediately with the HLS master URL
+    return jsonify({
+        'message': 'Upload started, HLS conversion in progress',
+        'filename': filename,
+        'hls_master': f"hls_{os.path.splitext(filename)[0]}/master.m3u8"
+    }), 202
 
 @app.route('/uploads/<path:filename>')
 def serve_file(filename):
     """Serve static HLS files from the uploads directory."""
+    logger.info(filename)
     return send_from_directory(app.config['UPLOAD_FOLDER'], filename)
 
 if __name__ == '__main__':
