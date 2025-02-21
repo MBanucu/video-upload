@@ -24,58 +24,47 @@ def allowed_file(filename):
     return '.' in filename and \
            filename.rsplit('.', 1)[1].lower() in {'mp4', 'avi', 'mov', 'wmv', 'mkv', 'mts'}
 
-def convert_to_hls(input_path, output_base):
-    # Define resolutions and their settings
-    resolutions = [
-        {"height": 144, "bitrate": "200k"},
-        {"height": 240, "bitrate": "400k"},
-        {"height": 360, "bitrate": "800k"},
-        {"height": 480, "bitrate": "1200k"},
-        {"height": 720, "bitrate": "2500k"},
-        {"height": 1080, "bitrate": "5000k"},
-        {"height": 1440, "bitrate": "8000k"}
-    ]
+def write_master_m3u8(output_base, resolutions_completed):
+    """Generate or update the master.m3u8 file with completed resolutions."""
+    master_content = "#EXTM3U\n#EXT-X-VERSION:3\n"
+    for res in resolutions_completed:
+        master_content += (
+            f"#EXT-X-STREAM-INF:BANDWIDTH={res['bitrate'].replace('k', '000')},RESOLUTION={res['resolution']}\n"
+            f"v{res['index']}/playlist.m3u8\n"
+        )
+    with open(f"{output_base}/master.m3u8", 'w') as f:
+        f.write(master_content)
+    logger.info(f"Updated master.m3u8 with resolutions: {[r['height'] for r in resolutions_completed]}")
 
-    # Base FFmpeg command
-    ffmpeg_cmd = [
+def convert_resolution_to_hls(input_path, output_base, resolution):
+    """Convert a single resolution to HLS segments and playlist."""
+    index = resolution['index']
+    height = resolution['height']
+    bitrate = resolution['bitrate']
+    output_dir = f"{output_base}/v{index}"
+    os.makedirs(output_dir, exist_ok=True)
+
+    cmd = [
+        'cpulimit', '--limit', '50', '--',  # Limit CPU to 50%
         'ffmpeg',
         '-i', input_path,
-        '-preset', 'fast',
+        '-vf', f'scale=-2:{height}',
         '-c:v', 'libx264',
+        '-b:v', bitrate,
         '-c:a', 'aac',
         '-f', 'hls',
         '-hls_time', '10',
         '-hls_list_size', '0',
-        '-hls_segment_filename', f'{output_base}/v%v/segment%d.ts',
+        '-hls_segment_filename', f'{output_dir}/segment%d.ts',
+        f'{output_dir}/playlist.m3u8'
     ]
 
-    # Add scaling and bitrate for each resolution
-    for i, res in enumerate(resolutions):
-        ffmpeg_cmd.extend([
-            f'-vf:{i}', f'scale=-2:{res["height"]}',
-            f'-b:v:{i}', res["bitrate"],
-            f'-map', '0:v',
-            f'-map', '0:a?',
-        ])
-
-    # Variable stream mapping
-    var_stream_map = ' '.join(f'v:{i},a:{i}' for i in range(len(resolutions)))
-    ffmpeg_cmd.extend([
-        '-var_stream_map', var_stream_map,
-        '-master_pl_name', f'{output_base}/master.m3u8',
-        f'{output_base}/v%v/playlist.m3u8'
-    ])
-
-    # Wrap FFmpeg with cpulimit to limit CPU to 50%
-    cmd = ['cpulimit', '--limit', '50', '--'] + ffmpeg_cmd
-
     try:
-        # Run the command
         result = subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-        logger.info(f"HLS conversion completed for {input_path}")
+        logger.info(f"Completed HLS conversion for {height}p")
         logger.debug(f"FFmpeg output: {result.stdout}")
     except subprocess.CalledProcessError as e:
-        logger.error(f"FFmpeg error: {e.stderr}")
+        logger.error(f"FFmpeg error for {height}p: {e.stderr}")
         raise
 
 @app.route('/upload', methods=['POST'])
@@ -98,9 +87,25 @@ def upload_file():
     output_base = os.path.join(app.config['UPLOAD_FOLDER'], f"hls_{os.path.splitext(filename)[0]}")
     os.makedirs(output_base, exist_ok=True)
 
+    # Define resolutions in order
+    resolutions = [
+        {"index": 0, "height": 144, "bitrate": "200k", "resolution": "256x144"},
+        {"index": 1, "height": 240, "bitrate": "400k", "resolution": "426x240"},
+        {"index": 2, "height": 360, "bitrate": "800k", "resolution": "640x360"},
+        {"index": 3, "height": 480, "bitrate": "1200k", "resolution": "854x480"},
+        {"index": 4, "height": 720, "bitrate": "2500k", "resolution": "1280x720"},
+        {"index": 5, "height": 1080, "bitrate": "5000k", "resolution": "1920x1080"},
+        {"index": 6, "height": 1440, "bitrate": "8000k", "resolution": "2560x1440"}
+    ]
+
     try:
-        # Convert to HLS with CPU limit
-        convert_to_hls(file_path, output_base)
+        # Process resolutions sequentially, starting with 144p
+        completed_resolutions = []
+        for res in resolutions:
+            completed_resolutions.append(res)
+            write_master_m3u8(output_base, completed_resolutions)
+            convert_resolution_to_hls(file_path, output_base, res)
+
         return jsonify({
             'message': 'File uploaded and converted to HLS successfully',
             'filename': filename,
