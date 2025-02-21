@@ -50,7 +50,7 @@ def convert_resolution_to_hls(input_path, output_base, resolution, filename):
     os.makedirs(output_dir, exist_ok=True)
 
     cmd = [
-        'cpulimit', '--limit', '50', '--',
+        'cpulimit', '--limit', '200', '--',
         'ffmpeg',
         '-i', input_path,
         '-vf', f'scale=-2:{height}',
