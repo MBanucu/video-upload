@@ -25,17 +25,17 @@ def allowed_file(filename):
     return '.' in filename and \
            filename.rsplit('.', 1)[1].lower() in {'mp4', 'avi', 'mov', 'wmv', 'mkv', 'mts'}
 
-def write_master_m3u8(output_base, resolutions_completed):
+def write_master_m3u8(output_base, resolutions_available):
     """Generate or update the master.m3u8 file with completed resolutions."""
     master_content = "#EXTM3U\n#EXT-X-VERSION:3\n"
-    for res in resolutions_completed:
+    for res in resolutions_available:
         master_content += (
             f"#EXT-X-STREAM-INF:BANDWIDTH={res['bitrate'].replace('k', '000')},RESOLUTION={res['resolution']}\n"
             f"v{res['index']}/playlist.m3u8\n"
         )
     with open(f"{output_base}/master.m3u8", 'w') as f:
         f.write(master_content)
-    logger.info(f"Updated master.m3u8 with resolutions: {[r['height'] for r in resolutions_completed]}")
+    logger.info(f"Updated master.m3u8 with resolutions: {[r['height'] for r in resolutions_available]}")
 
 def convert_resolution_to_hls(input_path, output_base, resolution):
     """Convert a single resolution to HLS segments and playlist."""
@@ -70,11 +70,11 @@ def convert_resolution_to_hls(input_path, output_base, resolution):
 
 def background_convert(file_path, output_base, resolutions):
     """Run HLS conversion in the background, processing resolutions sequentially."""
-    completed_resolutions = []
+    available_resolutions = []
     try:
         for res in resolutions:
-            completed_resolutions.append(res)
-            write_master_m3u8(output_base, completed_resolutions)
+            available_resolutions.append(res)
+            write_master_m3u8(output_base, available_resolutions)
             convert_resolution_to_hls(file_path, output_base, res)
         logger.info(f"Background HLS conversion completed for {file_path}")
     except Exception as e:
@@ -124,8 +124,41 @@ def upload_file():
 @app.route('/uploads/<path:filename>')
 def serve_file(filename):
     """Serve static HLS files from the uploads directory."""
-    logger.info(filename)
     return send_from_directory(app.config['UPLOAD_FOLDER'], filename)
+
+@app.route('/status/<filename>')
+def conversion_status(filename):
+    """Check the status of HLS conversion for a given filename."""
+    output_base = os.path.join(app.config['UPLOAD_FOLDER'], f"hls_{os.path.splitext(filename)[0]}")
+    master_path = f"{output_base}/master.m3u8"
+    
+    total_resolutions = 7  # Total number of resolutions (144p to 1440p)
+
+    if not os.path.exists(master_path):
+        # Check if the original file exists but conversion hasn’t started
+        if os.path.exists(os.path.join(app.config['UPLOAD_FOLDER'], filename)):
+            return jsonify({
+                'status': 'pending',
+                'resolutions_available': 0,
+                'total_resolutions': total_resolutions
+            }), 200
+        return jsonify({'status': 'not_found', 'error': 'File not uploaded'}), 404
+
+    try:
+        with open(master_path, 'r') as f:
+            lines = f.readlines()
+            resolutions_available = sum(1 for line in lines if 'playlist.m3u8' in line)
+        
+        status = 'completed' if resolutions_available == total_resolutions else 'processing'
+        return jsonify({
+            'status': status,
+            'resolutions_available': resolutions_available,
+            'total_resolutions': total_resolutions,
+            'hls_master': f"hls_{os.path.splitext(filename)[0]}/master.m3u8"
+        }), 200
+    except Exception as e:
+        logger.error(f"Error reading master.m3u8: {e}")
+        return jsonify({'status': 'error', 'error': str(e)}), 500
 
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=5000)

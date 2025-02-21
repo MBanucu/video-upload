@@ -1,14 +1,18 @@
 // client/src/App.jsx
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import axios from 'axios'
 
 function App() {
   const [file, setFile] = useState(null)
   const [uploadProgress, setUploadProgress] = useState(0)
+  const [message, setMessage] = useState('')
+  const [status, setStatus] = useState(null)
 
   const handleFileChange = (e) => {
     setFile(e.target.files[0])
     setUploadProgress(0)
+    setMessage('')
+    setStatus(null)
   }
 
   const handleUpload = async () => {
@@ -19,21 +23,29 @@ function App() {
 
     try {
       const response = await axios.post('http://localhost:5000/upload', formData, {
-        headers: {
-          'Content-Type': 'multipart/form-data',
-        },
-        onUploadProgress: (progressEvent) => {
-          const { loaded, total } = progressEvent
-          const percent = Math.floor((loaded * 100) / total)
-          setUploadProgress(percent)
-        },
+        headers: { 'Content-Type': 'multipart/form-data' },
       })
-      console.log('Upload successful:', response.data)
-      setUploadProgress(100)
+      setMessage(response.data.message)
+      pollStatus(file.name)
     } catch (error) {
       console.error('Upload failed:', error)
-      setUploadProgress(0)
+      setMessage('Upload failed')
     }
+  }
+
+  const pollStatus = (filename) => {
+    const interval = setInterval(async () => {
+      try {
+        const response = await axios.get(`http://localhost:5000/status/${filename}`)
+        setStatus(response.data)
+        if (response.data.status === 'completed' || response.data.status === 'error') {
+          clearInterval(interval)
+        }
+      } catch (error) {
+        console.error('Status check failed:', error)
+        clearInterval(interval)
+      }
+    }, 2000) // Poll every 2 seconds
   }
 
   return (
@@ -41,35 +53,20 @@ function App() {
       <h1>Video Uploader</h1>
       <input
         type="file"
-        accept="video/*,.mkv,video/x-matroska,.MTS"
+        accept="video/*,.mkv,video/x-matroska"
         onChange={handleFileChange}
       />
       <button onClick={handleUpload} disabled={!file}>
         Upload Video
       </button>
-
-      {/* Progress Bar */}
-      {uploadProgress > 0 && (
+      {message && <p>{message}</p>}
+      {status && (
         <div style={{ marginTop: '20px' }}>
-          <label>Upload Progress: {uploadProgress}%</label>
-          <div
-            style={{
-              width: '100%',
-              height: '20px',
-              backgroundColor: '#e0e0e0',
-              borderRadius: '4px',
-              overflow: 'hidden',
-            }}
-          >
-            <div
-              style={{
-                width: `${uploadProgress}%`,
-                height: '100%',
-                backgroundColor: '#4caf50',
-                transition: 'width 0.3s ease-in-out',
-              }}
-            />
-          </div>
+          <p>Status: {status.status}</p>
+          <p>Resolutions Available: {status.resolutions_available}/{status.total_resolutions}</p>
+          {status.hls_master && (
+            <p>HLS Stream: <a href={`http://localhost:5000/uploads/${status.hls_master}`}>{status.hls_master}</a></p>
+          )}
         </div>
       )}
     </div>
