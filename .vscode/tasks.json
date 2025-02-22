@@ -14,7 +14,7 @@
       {
         "label": "Run Vite Client",
         "type": "shell",
-        "command": "cd ${workspaceFolder}/client && npm run dev",
+        "command": "cd ${workspaceFolder}/client && npm install && npm run dev",
         "group": "build",
         "presentation": {
           "reveal": "always",
