@@ -12,15 +12,19 @@ pkgs.mkShell {
     nodejs # for npm and vite
     python311 # Python 3.11
     python311Packages.flask # Flask
-    python311Packages.flask-cors # Add Flask-CORS
-    ffmpeg # Add FFmpeg
-    cpulimit # Add cpulimit
-    vscode # Add Visual Studio Code
+    python311Packages.flask-cors # Flask-CORS
+    ffmpeg # FFmpeg
+    cpulimit # cpulimit
+    vscode # Visual Studio Code
+    xdotool # Add xdotool for keystroke simulation
   ];
 
   shellHook = ''
     export FLASK_ENV=development
-    code .
-    echo "press ctrl+shift+B in VSCode to build and run the project"
+    echo "Starting VS Code and triggering build..."
+    code . # Launch VS Code in the background
+    xdotool search --sync --onlyvisible --class "Code" windowactivate
+    sleep 5 # Wait for VS Code to open (adjust as needed)
+    xdotool search --sync --onlyvisible --class "Code" windowactivate key ctrl+shift+b
   '';
 }
