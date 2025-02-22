@@ -49,8 +49,12 @@ def convert_resolution_to_hls(input_path, output_base, resolution, filename):
     output_dir = f"{output_base}/v{index}"
     os.makedirs(output_dir, exist_ok=True)
 
+    # Calculate CPU limit dynamically: 50% of total CPU capacity
+    num_cores = os.cpu_count()  # Equivalent to `nproc` in Python
+    cpu_limit = (num_cores * 100) // 2  # Integer division for 50% of total capacity
+
     cmd = [
-        'cpulimit', '--limit', '200', '--',
+        'cpulimit', '--limit', str(cpu_limit), '--',  # Dynamic limit based on cores
         'ffmpeg',
         '-i', input_path,
         '-vf', f'scale=-2:{height}',
